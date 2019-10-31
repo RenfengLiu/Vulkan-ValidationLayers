@@ -8452,3 +8452,87 @@ TEST_F(VkPositiveLayerTest, GeometryShaderPassthroughNV) {
 
     m_errorMonitor->VerifyNotFound();
 }
+
+TEST_F(VkPositiveLayerTest, ResetQueryPoolEXT) {
+    TEST_DESCRIPTION("Test vkResetQueryPoolEXT");
+    if (!InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
+        printf("%s Did not find required instance extension %s; skipped.\n", kSkipPrefix,
+               VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        return;
+    }
+    m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (!DeviceExtensionSupported(gpu(), nullptr, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME)) {
+        printf("%s Extension %s not supported by device; skipped.\n", kSkipPrefix, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME);
+        return;
+    }
+
+    m_device_extension_names.push_back(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME);
+
+    VkPhysicalDeviceHostQueryResetFeaturesEXT host_query_reset_features{};
+    host_query_reset_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES_EXT;
+    host_query_reset_features.hostQueryReset = VK_TRUE;
+
+    VkPhysicalDeviceFeatures2 pd_features2{};
+    pd_features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    pd_features2.pNext = &host_query_reset_features;
+
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &pd_features2));
+
+    VkQueryPool query_pool;
+    VkQueryPoolCreateInfo query_pool_create_info{};
+    query_pool_create_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    query_pool_create_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    query_pool_create_info.queryCount = 1;
+    vk::CreateQueryPool(m_device->device(), &query_pool_create_info, nullptr, &query_pool);
+
+    auto fpvkResetQueryPoolEXT = (PFN_vkResetQueryPoolEXT)vk::GetDeviceProcAddr(m_device->device(), "vkResetQueryPoolEXT");
+    fpvkResetQueryPoolEXT(m_device->device(), query_pool, 0, 1);
+
+    char data_space4[4] = "";
+    vk::GetQueryPoolResults(m_device->handle(), query_pool, 0, 0, sizeof(data_space4), &data_space4, 4, VK_QUERY_RESULT_WAIT_BIT);
+
+    m_commandBuffer->begin();
+    //vk::CmdResetQueryPool(m_commandBuffer->handle(), query_pool, 0, 1);
+    //vk::CmdWriteTimestamp(m_commandBuffer->handle(), VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, query_pool, 0);
+    vk::CmdBeginQuery(m_commandBuffer->handle(), query_pool, 0, 0);
+    vk::CmdEndQuery(m_commandBuffer->handle(), query_pool, 0);
+    m_commandBuffer->end();
+
+    VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0};
+    VkFence f1,f2;
+    vk::CreateFence(m_device->device(), &fci, nullptr, &f1);
+    vk::CreateFence(m_device->device(), &fci, nullptr, &f2);
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &m_commandBuffer->handle();
+    m_errorMonitor->ExpectSuccess();
+    vk::QueueSubmit(m_device->m_queue, 1, &submit_info, f1);
+    m_errorMonitor->VerifyNotFound();
+    vk::QueueWaitIdle(m_device->m_queue);
+    // vk::WaitForFences(m_device->device(), 1, &fence, VK_TRUE, UINT64_MAX);
+    // vk::ResetFences(m_device->device(), 1, &fence);
+
+    vk::GetQueryPoolResults(m_device->handle(), query_pool, 0, 0, sizeof(data_space4), &data_space4, 4, VK_QUERY_RESULT_WAIT_BIT);
+    fpvkResetQueryPoolEXT(m_device->device(), query_pool, 0, 1);
+
+    m_commandBuffer->begin();
+    // vk::CmdResetQueryPool(m_commandBuffer->handle(), query_pool, 0, 1);
+    // vk::CmdWriteTimestamp(m_commandBuffer->handle(), VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, query_pool, 0);
+    vk::CmdBeginQuery(m_commandBuffer->handle(), query_pool, 0, 0);
+    vk::CmdEndQuery(m_commandBuffer->handle(), query_pool, 0);
+    m_commandBuffer->end();
+
+    m_errorMonitor->ExpectSuccess();
+    vk::QueueSubmit(m_device->m_queue, 1, &submit_info, f2);
+    m_errorMonitor->VerifyNotFound();
+    vk::QueueWaitIdle(m_device->m_queue);
+
+    vk::DestroyQueryPool(m_device->device(), query_pool, nullptr);
+    vk::DestroyFence(m_device->device(), f1, NULL);
+    vk::DestroyFence(m_device->device(), f2, NULL);
+}
